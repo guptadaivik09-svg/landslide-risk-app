@@ -5,348 +5,531 @@ from streamlit_folium import st_folium
 from datetime import datetime
 
 st.set_page_config(
-    page_title="NER Landslide Safety System",
+    page_title="LandGuard NER",
     page_icon="⛰️",
     layout="wide"
 )
 
-# ---------- Sample data ----------
+# ---------------- SAMPLE DATA ----------------
+
 locations = {
-    "East Khasi Hills, Meghalaya": (25.57, 91.88),
-    "Aizawl, Mizoram": (23.73, 92.72),
-    "Gangtok, Sikkim": (27.33, 88.61),
-    "Kohima, Nagaland": (25.67, 94.11),
-    "Tawang, Arunachal Pradesh": (27.59, 91.86),
+    "Mawphlang": (25.48, 91.75),
+    "Shillong Bypass": (25.58, 91.88),
+    "Sohra Road": (25.27, 91.73),
+    "Nongpoh": (25.90, 91.88),
+    "Mawsynram": (25.30, 91.58)
 }
 
-sample_reports = pd.DataFrame({
-    "Location": [
-        "East Khasi Hills",
-        "Aizawl",
-        "Gangtok",
-        "Kohima"
-    ],
-    "Report": [
-        "Roadside cracks reported",
-        "Heavy rainfall near hill road",
-        "Small rockfall observed",
-        "Waterlogged slope"
-    ],
-    "Priority": [
-        "High",
-        "Medium",
-        "High",
-        "Medium"
-    ],
-    "Status": [
-        "Inspection required",
-        "Monitoring",
-        "Team assigned",
-        "Monitoring"
-    ]
-})
+location_data = {
+    "Mawphlang": {
+        "rainfall": 280,
+        "soil": 78,
+        "slope": 62,
+        "movement": 42,
+        "population": 3200,
+        "road": "Important district road",
+        "hospital": 1,
+        "school": 3
+    },
+    "Shillong Bypass": {
+        "rainfall": 210,
+        "soil": 65,
+        "slope": 48,
+        "movement": 25,
+        "population": 8500,
+        "road": "Major highway",
+        "hospital": 2,
+        "school": 5
+    },
+    "Sohra Road": {
+        "rainfall": 360,
+        "soil": 84,
+        "slope": 70,
+        "movement": 55,
+        "population": 1900,
+        "road": "Tourist and local road",
+        "hospital": 0,
+        "school": 2
+    },
+    "Nongpoh": {
+        "rainfall": 150,
+        "soil": 45,
+        "slope": 30,
+        "movement": 8,
+        "population": 2100,
+        "road": "Local road",
+        "hospital": 1,
+        "school": 2
+    },
+    "Mawsynram": {
+        "rainfall": 250,
+        "soil": 70,
+        "slope": 55,
+        "movement": 18,
+        "population": 2800,
+        "road": "Hill road",
+        "hospital": 0,
+        "school": 2
+    }
+}
 
-# ---------- Header ----------
-st.title("⛰️ NER Landslide Safety System")
-st.caption("AI-based early warning and risk monitoring prototype for the North Eastern Region")
+# ---------------- FUNCTIONS ----------------
+
+def calculate_risk(rainfall, soil, slope, movement):
+    rainfall_score = min((rainfall / 400) * 100, 100)
+    soil_score = soil
+    slope_score = min((slope / 70) * 100, 100)
+    movement_score = min((movement / 60) * 100, 100)
+
+    score = (
+        rainfall_score * 0.35
+        + soil_score * 0.20
+        + slope_score * 0.25
+        + movement_score * 0.20
+    )
+
+    return round(min(score, 100), 1)
+
+
+def risk_category(score):
+    if score <= 25:
+        return "LOW", "green"
+    elif score <= 50:
+        return "MODERATE", "yellow"
+    elif score <= 75:
+        return "HIGH", "orange"
+    return "CRITICAL", "red"
+
+
+def priority_score(risk, population, road, hospital, school):
+    road_value = {
+        "Major highway": 25,
+        "Important district road": 20,
+        "Tourist and local road": 15,
+        "Hill road": 12,
+        "Local road": 8
+    }
+
+    exposure = min(population / 100, 40)
+    infrastructure = (
+        road_value.get(road, 10)
+        + hospital * 8
+        + school * 3
+    )
+
+    score = risk * 0.55 + exposure + infrastructure
+    return round(min(score, 100), 1)
+
+
+# ---------------- HEADER ----------------
+
+st.title("⛰️ LandGuard NER")
+st.subheader("AI-Based Landslide Early Warning & Response System")
+
+st.write(
+    "A decision-support prototype that converts landslide risk into "
+    "prioritized disaster-response action."
+)
 
 st.info(
-    "This is a team demonstration prototype. It uses sample conditions "
-    "to show how authorities could monitor risk and respond early."
+    "Demo flow: Predict → Verify → Prioritize → Alert → Respond"
 )
 
-# ---------- Sidebar ----------
-st.sidebar.title("Control Panel")
+# ---------------- SIDEBAR ----------------
 
-district = st.sidebar.selectbox(
-    "Choose monitoring area",
-    list(locations.keys())
+st.sidebar.header("Monitoring Control")
+
+selected_location = st.sidebar.selectbox(
+    "Select monitoring location",
+    list(location_data.keys())
 )
 
-st.sidebar.subheader("Enter current conditions")
+data = location_data[selected_location]
+
+st.sidebar.write("Current demo conditions")
 
 rainfall = st.sidebar.slider(
     "Rainfall in last 24 hours (mm)",
-    0, 500, 120
+    0, 500, data["rainfall"]
+)
+
+soil = st.sidebar.slider(
+    "Soil moisture (%)",
+    0, 100, data["soil"]
 )
 
 slope = st.sidebar.slider(
     "Slope steepness (degrees)",
-    0, 90, 35
-)
-
-soil_moisture = st.sidebar.slider(
-    "Soil moisture (%)",
-    0, 100, 55
+    0, 90, data["slope"]
 )
 
 movement = st.sidebar.slider(
     "Ground movement (mm)",
-    0, 100, 10
+    0, 100, data["movement"]
 )
 
-# ---------- Risk calculation ----------
-rainfall_score = min(rainfall / 300 * 100, 100)
-slope_score = slope / 60 * 100
-moisture_score = soil_moisture
-movement_score = movement
+risk = calculate_risk(rainfall, soil, slope, movement)
+category, map_color = risk_category(risk)
 
-risk_score = (
-    rainfall_score * 0.35
-    + slope_score * 0.25
-    + moisture_score * 0.20
-    + movement_score * 0.20
+priority = priority_score(
+    risk,
+    data["population"],
+    data["road"],
+    data["hospital"],
+    data["school"]
 )
 
-risk_score = round(min(risk_score, 100), 1)
-
-if risk_score < 35:
-    risk_level = "LOW"
-    risk_color = "green"
-    advice = "Continue normal monitoring."
-elif risk_score < 65:
-    risk_level = "MEDIUM"
-    risk_color = "orange"
-    advice = "Increase monitoring and inspect vulnerable roads."
+if priority >= 75:
+    priority_level = "P1 - Immediate Action"
+elif priority >= 50:
+    priority_level = "P2 - High Priority"
+elif priority >= 30:
+    priority_level = "P3 - Monitor Closely"
 else:
-    risk_level = "HIGH"
-    risk_color = "red"
-    advice = "Issue early warning and prepare emergency response."
+    priority_level = "P4 - Routine Monitoring"
 
-# ---------- Tabs ----------
+# ---------------- TABS ----------------
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Dashboard",
-    "🧮 Risk Calculator",
-    "🗺️ Risk Map",
-    "📢 Field Reports",
-    "ℹ️ About Project"
+    "📊 Command Dashboard",
+    "🤖 Risk Prediction",
+    "🚨 Response Priority",
+    "📸 Field Verification",
+    "🛟 Emergency Response"
 ])
 
-# ---------- Dashboard ----------
+# ---------------- TAB 1 ----------------
+
 with tab1:
-    st.header("Current Situation")
+    st.header("District Command Center")
+    st.write(f"Currently monitoring: **{selected_location}, East Khasi Hills**")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Selected Area", district.split(",")[0])
-    col2.metric("Risk Score", f"{risk_score}/100")
-    col3.metric("Rainfall", f"{rainfall} mm")
-    col4.metric("Ground Movement", f"{movement} mm")
+    col1.metric("Critical Zones", "2")
+    col2.metric("High-Risk Zones", "4")
+    col3.metric("Open Reports", "7")
+    col4.metric("Roads at Risk", "3")
 
-    if risk_level == "LOW":
-        st.success(f"🟢 LOW RISK — {advice}")
-    elif risk_level == "MEDIUM":
-        st.warning(f"🟡 MEDIUM RISK — {advice}")
+    st.divider()
+
+    st.subheader(f"Current Status: {selected_location}")
+
+    if category == "LOW":
+        st.success(f"🟢 {category} RISK")
+    elif category == "MODERATE":
+        st.warning(f"🟡 {category} RISK")
+    elif category == "HIGH":
+        st.warning(f"🟠 {category} RISK")
     else:
-        st.error(f"🔴 HIGH RISK — {advice}")
+        st.error(f"🔴 {category} RISK")
 
-    st.subheader("What is happening?")
+    col1, col2, col3 = st.columns(3)
 
-    if rainfall > 250:
-        st.write("⚠️ Heavy rainfall is increasing the possibility of slope failure.")
+    col1.metric("Landslide Risk", f"{risk}/100")
+    col2.metric("Response Priority", priority_level)
+    col3.metric("Population Exposed", f"{data['population']:,}")
+
+    st.subheader("Why is this location being monitored?")
+
+    reasons = []
+
+    if rainfall >= 250:
+        reasons.append("High rainfall detected")
+
+    if soil >= 70:
+        reasons.append("Soil moisture is high")
+
+    if slope >= 50:
+        reasons.append("Steep slope detected")
+
+    if movement >= 30:
+        reasons.append("Ground movement reported")
+
+    if reasons:
+        for reason in reasons:
+            st.write(f"⚠️ {reason}")
     else:
-        st.write("🌦️ Rainfall is currently within the demo monitoring range.")
+        st.write("✅ No major warning indicator detected.")
 
-    if soil_moisture > 70:
-        st.write("💧 Soil moisture is high, which may reduce slope stability.")
-    else:
-        st.write("✅ Soil moisture is being monitored.")
+# ---------------- TAB 2 ----------------
 
-    if movement > 30:
-        st.write("🚨 Ground movement is high. A field inspection is recommended.")
-    else:
-        st.write("✅ No major ground movement is detected in this demo.")
-
-    st.subheader("Immediate Action")
-
-    if risk_level == "HIGH":
-        st.error(
-            "1. Alert district officials\n"
-            "2. Inspect nearby roads\n"
-            "3. Notify nearby communities\n"
-            "4. Prepare evacuation support"
-        )
-    elif risk_level == "MEDIUM":
-        st.warning(
-            "1. Increase monitoring\n"
-            "2. Check rainfall again after a few hours\n"
-            "3. Keep response teams ready"
-        )
-    else:
-        st.success(
-            "1. Continue routine monitoring\n"
-            "2. Keep field reporting active"
-        )
-
-# ---------- Risk Calculator ----------
 with tab2:
-    st.header("How the Risk Score Is Calculated")
+    st.header("AI Risk Prediction")
 
     st.write(
-        "The prototype combines four warning factors. "
-        "Higher values increase the risk score."
+        "The prototype combines rainfall, soil moisture, slope, "
+        "and ground movement to calculate a risk score."
     )
 
-    factor_data = pd.DataFrame({
-        "Factor": [
+    factor_table = pd.DataFrame({
+        "Input Factor": [
             "Rainfall",
-            "Slope",
             "Soil Moisture",
+            "Slope",
             "Ground Movement"
         ],
         "Current Value": [
-            rainfall,
-            slope,
-            soil_moisture,
-            movement
+            f"{rainfall} mm",
+            f"{soil}%",
+            f"{slope} degrees",
+            f"{movement} mm"
         ],
-        "Importance": [
-            "Very High",
-            "High",
-            "Medium",
-            "Very High"
+        "Effect": [
+            "Very High" if rainfall > 250 else "Moderate",
+            "High" if soil > 70 else "Moderate",
+            "High" if slope > 50 else "Moderate",
+            "Very High" if movement > 30 else "Low"
         ]
     })
 
-    st.dataframe(factor_data, use_container_width=True)
+    st.dataframe(factor_table, use_container_width=True)
 
-    st.subheader("Risk Factor Chart")
+    st.subheader("Risk Indicator Chart")
+
     chart_data = pd.DataFrame({
-        "Factor": ["Rainfall", "Slope", "Soil Moisture", "Movement"],
+        "Factor": [
+            "Rainfall",
+            "Soil Moisture",
+            "Slope",
+            "Ground Movement"
+        ],
         "Score": [
-            round(rainfall_score, 1),
-            round(min(slope_score, 100), 1),
-            round(moisture_score, 1),
-            round(movement_score, 1)
+            min(rainfall / 4, 100),
+            soil,
+            min(slope / 0.7, 100),
+            min(movement / 0.6, 100)
         ]
     })
 
     st.bar_chart(chart_data.set_index("Factor"))
 
-    st.subheader("Interpretation")
-    st.write(f"Current risk category: **{risk_level}**")
-    st.write(f"Suggested action: **{advice}**")
-
-# ---------- Map ----------
-with tab3:
-    st.header("North Eastern Region Monitoring Map")
-
-    selected_lat, selected_lon = locations[district]
-
-    risk_map = folium.Map(
-        location=[25.5, 91.8],
-        zoom_start=6
-    )
-
-    for name, coordinates in locations.items():
-        if name == district:
-            marker_color = risk_color
-            radius = 18
-            popup_text = f"{name} - Selected area - {risk_level} risk"
-        else:
-            marker_color = "blue"
-            radius = 8
-            popup_text = f"{name} - Sample monitoring point"
-
-        folium.CircleMarker(
-            location=coordinates,
-            radius=radius,
-            color=marker_color,
-            fill=True,
-            fill_color=marker_color,
-            fill_opacity=0.75,
-            popup=popup_text
-        ).add_to(risk_map)
-
-    st_folium(risk_map, width=1100, height=500)
+    st.metric("AI Risk Score", f"{risk}/100")
 
     st.caption(
-        "Green = low risk, orange = medium risk, red = high risk. "
-        "Blue points represent other sample monitoring locations."
+        "This is a demonstration scoring model. A production system "
+        "would be trained using historical and real-time data."
     )
 
-# ---------- Reports ----------
-with tab4:
-    st.header("Citizen and Field Officer Reports")
+# ---------------- TAB 3 ----------------
+
+with tab3:
+    st.header("Response Priority Engine")
 
     st.write(
-        "Field officers or citizens can report cracks, rockfalls, "
-        "blocked roads, or unusual ground movement."
+        "Two places may have similar landslide risk, but the location "
+        "with more people and critical infrastructure should be handled first."
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Risk Score", f"{risk}/100")
+    col2.metric("Population Exposed", f"{data['population']:,}")
+    col3.metric("Hospitals", data["hospital"])
+    col4.metric("Schools", data["school"])
+
+    st.subheader("Priority Result")
+
+    if priority_level.startswith("P1"):
+        st.error(f"🚨 {priority_level}")
+    elif priority_level.startswith("P2"):
+        st.warning(f"🟠 {priority_level}")
+    else:
+        st.info(f"📍 {priority_level}")
+
+    st.write(f"Nearby road: **{data['road']}**")
+    st.write(
+        "The priority score considers hazard risk, exposed population, "
+        "roads, hospitals, and schools."
+    )
+
+    comparison = pd.DataFrame({
+        "Location": [
+            selected_location,
+            "Example low-exposure location"
+        ],
+        "Risk Score": [
+            risk,
+            91
+        ],
+        "Population": [
+            data["population"],
+            300
+        ],
+        "Priority": [
+            priority_level,
+            "P2 - High Priority"
+        ]
+    })
+
+    st.subheader("Why Risk Alone Is Not Enough")
+    st.dataframe(comparison, use_container_width=True)
+
+# ---------------- TAB 4 ----------------
+
+with tab4:
+    st.header("Field Verification")
+
+    st.write(
+        "Citizens and field officers can report cracks, rockfall, "
+        "blocked roads, or unusual slope movement."
     )
 
     with st.form("field_report"):
-        reporter_name = st.text_input("Name")
+        name = st.text_input("Reporter name")
         report_location = st.selectbox(
-            "Report location",
-            list(locations.keys())
+            "Location",
+            list(location_data.keys())
         )
         report_type = st.selectbox(
-            "Type of report",
+            "Report type",
             [
-                "Slope crack",
+                "Ground crack",
                 "Rockfall",
                 "Blocked road",
-                "Heavy rainfall",
-                "Ground movement"
+                "Water seepage",
+                "Slope movement"
             ]
         )
-        report_description = st.text_area(
-            "Describe what you observed"
-        )
-        uploaded_photo = st.file_uploader(
-            "Upload photo",
+        description = st.text_area("Describe the observation")
+        photo = st.file_uploader(
+            "Upload field photo",
             type=["jpg", "jpeg", "png"]
         )
 
-        submit_report = st.form_submit_button("Submit Report")
+        submitted = st.form_submit_button("Submit Report")
 
-        if submit_report:
+        if submitted:
             st.success(
-                "Report submitted successfully. "
-                "The monitoring team can review it."
+                "Report received successfully. "
+                "It has been added for human verification."
             )
 
-    st.subheader("Existing Demo Reports")
-    st.dataframe(sample_reports, use_container_width=True)
+            st.write("AI-assisted verification status: **Pending review**")
+            st.write("Human verification required before official action.")
 
-# ---------- About ----------
+    st.subheader("Sample Reports")
+
+    reports = pd.DataFrame({
+        "Location": [
+            "Mawphlang",
+            "Sohra Road",
+            "Shillong Bypass"
+        ],
+        "Observation": [
+            "Surface cracks",
+            "Rockfall near road",
+            "Water seepage"
+        ],
+        "AI Confidence": [
+            "87%",
+            "79%",
+            "71%"
+        ],
+        "Status": [
+            "Needs inspection",
+            "Team assigned",
+            "Under review"
+        ]
+    })
+
+    st.dataframe(reports, use_container_width=True)
+
+# ---------------- TAB 5 ----------------
+
 with tab5:
-    st.header("About This Project")
+    st.header("Emergency Response")
 
     st.write(
-        "The North Eastern Region frequently experiences landslides "
-        "because of heavy rainfall, steep terrain, fragile slopes, "
-        "and road cutting."
+        "The response team can use the priority level to decide "
+        "what action should happen first."
     )
 
-    st.subheader("Main Goal")
-    st.write(
-        "To help authorities identify dangerous areas early, "
-        "monitor changing conditions, and respond before a disaster becomes worse."
+    if priority_level.startswith("P1"):
+        st.error("IMMEDIATE RESPONSE REQUIRED")
+
+        st.checkbox("Alert district disaster management authority")
+        st.checkbox("Inspect road and nearby slope")
+        st.checkbox("Notify nearby settlements")
+        st.checkbox("Prepare evacuation support")
+        st.checkbox("Send response team")
+
+    elif priority_level.startswith("P2"):
+        st.warning("HIGH PRIORITY RESPONSE")
+
+        st.checkbox("Increase monitoring")
+        st.checkbox("Inspect vulnerable road")
+        st.checkbox("Keep response team ready")
+        st.checkbox("Contact local officer")
+
+    else:
+        st.success("ROUTINE MONITORING")
+
+        st.checkbox("Continue regular monitoring")
+        st.checkbox("Review weather forecast")
+        st.checkbox("Keep field reporting active")
+
+    st.subheader("Alert Preview")
+
+    st.text_area(
+        "Message that can be sent to authorities/community",
+        value=(
+            f"LANDGUARD NER ALERT\n"
+            f"Location: {selected_location}\n"
+            f"Risk: {category}\n"
+            f"Risk Score: {risk}/100\n"
+            f"Priority: {priority_level}\n"
+            f"Action: Inspect vulnerable areas and follow local safety instructions."
+        ),
+        height=180
     )
 
-    st.subheader("Planned Real-World Data")
-    st.write(
-        "The future version can use rainfall data, soil moisture sensors, "
-        "satellite images, terrain information, historical landslide records, "
-        "and field reports."
-    )
+    st.button("Simulate Send Alert")
 
-    st.subheader("Prototype Team Roles")
-    st.write(
-        "• Data team: collect rainfall and landslide data\n"
-        "• AI team: improve the risk prediction model\n"
-        "• GIS team: improve the map\n"
-        "• App team: manage the dashboard and reports\n"
-        "• Presentation team: explain the solution and impact"
-    )
+# ---------------- MAP ----------------
 
-    st.subheader("Important Note")
-    st.warning(
-        "This is a demonstration model and should not be used for real evacuation decisions."
-    )
+st.divider()
+st.header("🗺️ NER Risk Map")
+
+st.write(
+    "This map displays sample monitoring locations. "
+    "The selected location is shown with its current risk category."
+)
+
+map_object = folium.Map(
+    location=[25.55, 91.80],
+    zoom_start=9
+)
+
+for place, coordinates in locations.items():
+    if place == selected_location:
+        marker_color = map_color
+        marker_radius = 18
+        popup = f"{place}: {category} risk"
+    else:
+        marker_color = "blue"
+        marker_radius = 8
+        popup = f"{place}: Sample monitoring point"
+
+    folium.CircleMarker(
+        location=coordinates,
+        radius=marker_radius,
+        color=marker_color,
+        fill=True,
+        fill_color=marker_color,
+        fill_opacity=0.8,
+        popup=popup
+    ).add_to(map_object)
+
+st_folium(map_object, width=1100, height=500)
+
+st.caption(
+    "Prototype only: map points and risk values are sample data, "
+    "not official warning information."
+)
 
 st.divider()
 st.caption(
-    f"Prototype last viewed: {datetime.now().strftime('%d %B %Y, %I:%M %p')}"
+    f"LandGuard NER prototype | Updated: "
+    f"{datetime.now().strftime('%d %B %Y, %I:%M %p')}"
 )
